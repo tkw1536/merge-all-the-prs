@@ -25,3 +25,11 @@ Arguments:
 ```
 
 Note that this script is not secured against malicious arguments. 
+
+## Dependencies
+
+- [Getopt::Long](https://metacpan.org/pod/Getopt::Long)
+- [JSON](https://metacpan.org/pod/JSON)
+- [LWP::UserAgent](https://metacpan.org/pod/LWP::UserAgent)
+- [MIME::Base64](https://metacpan.org/pod/MIME::Base64)
+- [REST::Client](https://metacpan.org/pod/REST::Client)
