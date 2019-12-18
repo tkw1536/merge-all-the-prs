@@ -1,5 +1,7 @@
 #!/usr/bin/env perl
 
+use strict;
+
 use REST::Client;
 use MIME::Base64 qw(encode_base64);
 use LWP::UserAgent;
