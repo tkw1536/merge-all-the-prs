@@ -18,15 +18,17 @@ sub main {
     my $remote = 'origin';
     my $base = 'master';
     my $label = undef;
+    my $continue = 0;
 
-    # ./script.pl [--help] [--auth AUTH] [--remote REMOTE] [--base BASE] [--label LABEL] FOLDER BRANCH
+    # ./script.pl [--help] [--auth AUTH] [--remote REMOTE] [--base BASE] [--label LABEL] [--continue] FOLDER BRANCH
     GetOptionsFromArray(
         \@_,
         "help"          => \$help,
-        "auth=s"       => \$auth,
+        "auth=s"        => \$auth,
         "remote=s"      => \$remote,
         "base=s"        => \$base,
         "label=s"       => \$label,
+        "continue"      => \$continue,
     ) or return print_usage_and_help(1);
 
     # print help if it was requested or the wrong number of arguments was passed
@@ -77,13 +79,17 @@ sub main {
     
 
     # Merge each pr one by one into this branch
-    ($ok, $error) = merge_prs($remote, $prs);
-    if (defined($error) || !$ok) {
+    my ($merged, $failed);
+    ($merged, $failed, $error) = merge_prs($remote, $prs, $continue);
+    if (defined($error)) {
         print STDERR "Unable to merge pull requests. \n";
         print STDERR $error . "\n" if defined($error);
         return 1;
     }
-    print "Merged " . scalar(@$prs) . " PR(s) onto the '$branchname' branch. \n";
+    print "\n\n";
+    print "Merged " . scalar(@$merged) . " PR(s) onto the '$branchname' branch. \n";
+    print "Merged pull requests: " . join(', ', @$merged) . "\n" if (scalar(@$merged) > 0);
+    print "Failed pull requests: " . join(', ', @$failed) . "\n" if ($continue && scalar(@$failed) > 0);
 
     return 0;
 }
@@ -91,7 +97,7 @@ sub main {
 sub print_usage_and_help {
     my ($return_code) = @_;
     print STDERR <<'END_MESSAGE';
-./script.pl [--help] [--token TOKEN] [--remote REMOTE] [--base BASE] [--label LABEL] FOLDER BRANCH
+./script.pl [--help] [--token TOKEN] [--remote REMOTE] [--base BASE] [--label LABEL] [--continue] FOLDER BRANCH
 
 Merges open pull requests onto a new local branch. 
 
@@ -112,6 +118,9 @@ Arguments:
         Base branch to start process from. Defaults to 'master'. 
     --label LABEL
         Optional label to filter pull requests by.
+    --continue
+        By default, if a pull request fails to merge the process is aborted and an error is thrown.
+        This flag overrides the behaviour and simply skips the problematic pull requests.
 END_MESSAGE
     return $return_code;
 }
@@ -268,26 +277,41 @@ sub force_new_branch {
     return 1, undef;
 }
 
-# 'merge_prs' merges all prs with the given numbers onto the current branch
+# 'merge_prs' merges all prs with the given numbers onto the current branch. 
+# When continue is true, skips over pull requests that could not be merged. 
 sub merge_prs {
-    my ($remote, $numbers) = @_;
+    my ($remote, $numbers, $continue) = @_;
+
+    my @merged = ();
+    my @failed = ();
 
     # iterate over all pull requests
     my ($number);
-    foreach $number (@$numbers) {
+    foreach $number (sort @$numbers) {
         my $fetchCommand = "git fetch $remote pull/$number/head";
         print STDERR '=> ' . "$fetchCommand\n";
-        return undef, "Failed to fetch commits for PR $number"
+        return [@merged], [@failed], "Failed to fetch commits for PR $number"
             unless system($fetchCommand) == 0;
         
         my $mergeCommand = "git merge --no-edit FETCH_HEAD -X ours";
         print STDERR '=> ' . "$mergeCommand\n";
-        return undef, "Failed to merge PR $number (too many conflicts?)"
-            unless system($mergeCommand) == 0;
+        unless (system($mergeCommand) == 0) {
+            push(@failed, $number);
+
+            # If the merge failed, something terrible happened. 
+            # We abort the merge to get the checkout to some reasonable state. 
+            system("git merge --abort");
+            return [@merged], [@failed], "Failed to merge PR $number (too many conflicts?)" unless $continue;
+
+            print STDERR "Failed to merge PR $number, continuing with other pull requests. \n";
+            next;
+        }
+
+        push(@merged, $number);
     }
 
     # done
-    return 1, undef;
+    return [@merged], [@failed], undef;
 }
 
 

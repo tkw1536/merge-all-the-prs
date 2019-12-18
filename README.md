@@ -1,7 +1,7 @@
 # merge-all-the-prs
 
 ```
-./script.pl [--help] [--token TOKEN] [--remote REMOTE] [--base BASE] [--label LABEL] FOLDER BRANCH
+./script.pl [--help] [--token TOKEN] [--remote REMOTE] [--base BASE] [--label LABEL] [--continue] FOLDER BRANCH
 
 Merges open pull requests onto a new local branch. 
 
@@ -22,6 +22,9 @@ Arguments:
         Base branch to start process from. Defaults to 'master'. 
     --label LABEL
         Optional label to filter pull requests by.
+    --continue
+        By default, if a pull request fails to merge the process is aborted and an error is thrown.
+        This flag overrides the behaviour and simply skips the problematic pull requests.
 ```
 
 Note that this script is not secured against malicious arguments. 
