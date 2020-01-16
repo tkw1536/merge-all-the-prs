@@ -22,6 +22,9 @@ Arguments:
         Base branch to start process from. Defaults to 'master'. 
     --label LABEL
         Optional label to filter pull requests by.
+    --collabs
+        When provided and filtering is enabled (via --label), allow only PRs from collaborators with
+        push access to the repository. 
     --continue
         By default, if a pull request fails to merge the process is aborted and an error is thrown.
         This flag overrides the behaviour and simply skips the problematic pull requests.

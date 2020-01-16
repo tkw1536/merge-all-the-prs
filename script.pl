@@ -18,6 +18,7 @@ sub main {
     my $remote = 'origin';
     my $base = 'master';
     my $label = undef;
+    my $collabs = 0;
     my $continue = 0;
 
     # ./script.pl [--help] [--auth AUTH] [--remote REMOTE] [--base BASE] [--label LABEL] [--continue] FOLDER BRANCH
@@ -28,6 +29,7 @@ sub main {
         "remote=s"      => \$remote,
         "base=s"        => \$base,
         "label=s"       => \$label,
+        "collabs"       => \$collabs,
         "continue"      => \$continue,
     ) or return print_usage_and_help(1);
 
@@ -59,14 +61,14 @@ sub main {
 
     # get all the prs, TODO: Support for token
     my ($prs);
-    ($prs, $error) = fetch_repository_prs($auth, $repo, $base, $label);
+    ($prs, $error) = fetch_repository_prs($auth, $repo, $base, $label, $collabs);
     if (defined($error)) {
         print STDERR "Unable to query for open Pull Requests. \n";
         print STDERR $error . "\n";
         return 1;
     }
 
-    print "Found " . scalar(@$prs) . ' open PR(s)' . (defined($label) ? " with label '$label'" : '') . ".\n";
+    print "Found " . scalar(@$prs) . ' open PR(s)' . (defined($label) ? " with label '$label'" . ($collabs ? ' from contributors with push access' : ''): '') . ".\n";
 
     # Create a new branch
     ($ok, $error) = force_new_branch($base, $remote, $branchname);
@@ -118,6 +120,9 @@ Arguments:
         Base branch to start process from. Defaults to 'master'. 
     --label LABEL
         Optional label to filter pull requests by.
+    --collabs
+        When provided and filtering is enabled (via --label), allow only PRs from collaborators with
+        push access to the repository. 
     --continue
         By default, if a pull request fails to merge the process is aborted and an error is thrown.
         This flag overrides the behaviour and simply skips the problematic pull requests.
@@ -161,7 +166,7 @@ sub get_github_repo {
 # 'fetch_repository_prs' fetches the open PRs that are associated with a repository that have a certain label.
 # Returns a pair ($prs, $error)
 sub fetch_repository_prs {
-    my ($auth, $repository, $base, $label, $maxpages) = @_;
+    my ($auth, $repository, $base, $label, $require_collab, $maxpages) = @_;
 
     return undef, "No repository provided" unless defined($repository);
     return undef, "No base provided" unless defined($base);
@@ -171,6 +176,16 @@ sub fetch_repository_prs {
     my $client = REST::Client->new(useragent => $ua);
     my $url = "https://api.github.com/repos/$repository/pulls?state=open&base=$base";
 
+    # fetch the collaborators
+    my ($collabs, $derror, @collabs, %collabs);
+    if ($require_collab) {
+        ($collabs, $derror) = fetch_repo_collabs($client, $auth, $repository, $maxpages);
+        return undef, $derror if defined($derror);
+        foreach my $c (@$collabs){
+            $collabs{$c} = 1;
+        }
+    }
+
     # fetch the data
     my ($data, $error) = github_fetch_json_withnext($client, $url, $auth, defined($maxpages) ? $maxpages : 100);
     return undef, $error if defined($error);
@@ -179,14 +194,24 @@ sub fetch_repository_prs {
     my (@prs) = @$data;
     if(defined($label)) {
         my @indexes = grep {
+
+
             # get all the labels of this pr
             my @labels = @ { $prs[$_]{'labels'} };
 
             # put their names into a hash
             my %hash = map { $labels[$_]{'name'} => 1 } 0..$#labels;
 
+            # if we require the right submitter
+            my $collab = 1;
+            if ($require_collab) {
+                my $user = $prs[$_]{'user'}{'login'};
+                $collab = defined($collabs{$user});
+            }
+
             # check if we have the appropriate label
-            defined($hash{$label});
+            # and the collaborator if needed
+            $collab && defined($hash{$label});
         } 0..$#prs;
         @prs = map { $prs[$_] } @indexes;
     }
@@ -196,6 +221,31 @@ sub fetch_repository_prs {
 
     # and return
     return [@prs], undef;
+}
+
+# 'fetch_repo_collabs' fetches a list of collaborators with write access to a repository. 
+# Returns a pair ($@users, $error)
+sub fetch_repo_collabs {
+    my ($client, $auth, $repository, $maxpages) = @_;
+
+    my $url = "https://api.github.com/repos/$repository/collaborators";
+
+    my @users = ();
+
+    my ($data, $error) = github_fetch_json_withnext($client, $url, $auth, defined($maxpages) ? $maxpages : 100);
+    return undef, $error if defined($error);
+
+    # filter the ones that are allowed to push
+    # and only include their username
+    foreach my $u (@$data) {
+        my %uh = %$u;
+        if ($uh{'permissions'}{'push'}) {
+            push(@users, $uh{'login'});
+        }
+    }
+    
+    return [@users], undef;
+
 }
 
 # 'github_fetch_json_withnext' recursively fetches all results of a GitHub API GET request to the given url.
